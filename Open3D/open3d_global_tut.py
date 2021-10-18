@@ -2,8 +2,9 @@ import numpy as np
 import open3d as o3d
 import copy
 
-source = o3d.io.read_point_cloud("/Users/davidschaupp/Documents/GitHub/Vision/Open3D/Stanford_Bunny_ICP/bunny/data/bun000.ply")
-target = o3d.io.read_point_cloud("/Users/davidschaupp/Documents/GitHub/Vision/Open3D/Stanford_Bunny_ICP/bunny/data/bun090.ply")
+
+source = o3d.io.read_point_cloud("/Users/davidschaupp/Documents/GitHub/Vision/Open3D/test_data/ICP/cloud_bin_0.pcd")
+target = o3d.io.read_point_cloud("/Users/davidschaupp/Documents/GitHub/Vision/Open3D/test_data/ICP/cloud_bin_1.pcd")
 
 
 def draw_registration_result(source, target, transformation):
@@ -31,35 +32,45 @@ def preprocess_point_cloud(pcd, voxel_size):
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
     return pcd_down, pcd_fpfh
 
+
 def prepare_dataset(voxel_size):
+    trans_init = np.asarray([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0],
+                             [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    source.transform(trans_init)
+    draw_registration_result(source, target, np.identity(4))
+
     source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
     target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
     return source, target, source_down, target_down, source_fpfh, target_fpfh
 
-def execute_global_registration(source_down, target_down, source_fpfh,
-                                target_fpfh, voxel_size):
+def execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size):
     distance_threshold = voxel_size * 1.5
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source_down, target_down, source_fpfh, target_fpfh, True,
         distance_threshold,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-        3, [
-            o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(
-                0.9),
-            o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
-                distance_threshold)
-        ], o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(False),3,
+        [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)]
+        ,o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
     return result
 
-voxel_size = 0.001
-source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_dataset(
-    voxel_size)
+def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size):
+    distance_threshold = voxel_size * 0.4
+    result = o3d.pipelines.registration.registration_icp(
+        source, target, distance_threshold, result_ransac.transformation,
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    return result
+
+voxel_size = 0.05  # means 5cm for this dataset
+source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_dataset(voxel_size)
 
 result_ransac = execute_global_registration(source_down, target_down,
                                             source_fpfh, target_fpfh,
                                             voxel_size)
+draw_registration_result(source_down, target_down, result_ransac.transformation)
 
 print(result_ransac.transformation)
 
-#draw_registration_result(source_down, target_down, result_ransac.transformation)
-o3d.visualization.draw_geometries([target_down, source_down.transform(result_ransac.transformation)])
+result_icp = refine_registration(source, target, source_fpfh, target_fpfh,
+                                 voxel_size)
+draw_registration_result(source, target, result_icp.transformation)
+
